@@ -1,29 +1,13 @@
 /* ============================================================
- * 黑客监控窗 · NovelAI 生图监控扩展  v3.1
- * SillyTavern 第三方扩展（manifest.json + index.js）
- * 作者：千千 & 小克老师
- * v3.1：常驻可拖动【悬浮按钮】→ 打开【监控浮窗】（图/心率情绪/设置全在浮窗里）
- *       + 可选每条AI回复末尾也内嵌一个监控窗
- * 出图走酒馆同源 /api/novelai/generate-image（NAI key 存酒馆 API连接→NovelAI）
+ * 黑客监控窗 · NovelAI 生图监控扩展  v4.0
+ * 从左下角魔法棒菜单打开监控浮窗；读取正文自动生成监控画面。
+ * 出图走同源接口 /api/novelai/generate-image（NAI key 存于 API 连接 → NovelAI）
  * ============================================================ */
 
-// 只导入各版本酒馆都稳定存在的名字（和能跑的 ST-QuickBar 同一套），不依赖 window.SillyTavern.getContext
-import { chat, event_types, eventSource, saveSettingsDebounced, getRequestHeaders } from "../../../../script.js";
-import { extension_settings } from "../../../extensions.js";
-
-// generateQuietPrompt 在个别酒馆版本不是命名导出；动态取，取不到也不拖垮整个脚本
-let _gqp = null;
-import("../../../../script.js").then(m => { _gqp = m.generateQuietPrompt || null; }).catch(() => {});
-function gqp() {
-  if (_gqp) return _gqp;
-  try { if (window.SillyTavern && SillyTavern.getContext) return SillyTavern.getContext().generateQuietPrompt || null; } catch (e) {}
-  return null;
-}
-
 const MODULE = 'nai_monitor';
-// 兼容层：保持后面代码 getCtx().xxx 的写法不变
+// 运行时安全获取酒馆上下文；拿不到也不影响脚本加载
 function getCtx() {
-  return { chat, generateQuietPrompt: gqp(), getRequestHeaders, saveSettingsDebounced, eventSource, event_types, eventTypes: event_types, extensionSettings: extension_settings };
+  try { return (window.SillyTavern && SillyTavern.getContext) ? SillyTavern.getContext() : null; } catch (e) { return null; }
 }
 
 const DEF_INST =
@@ -55,17 +39,14 @@ const DEFAULTS = {
   trig: 'auto', markerOnly: false, showhr: true, accent: '#38f0c8'
 };
 
-let _LOCAL = null;
+let _cfg = null;
 function S() {
-  const c = getCtx();
-  if (c && c.extensionSettings) {
-    c.extensionSettings[MODULE] = Object.assign({}, DEFAULTS, c.extensionSettings[MODULE] || {});
-    return c.extensionSettings[MODULE];
-  }
-  if (!_LOCAL) _LOCAL = Object.assign({}, DEFAULTS);
-  return _LOCAL;
+  if (_cfg) return _cfg;
+  try { _cfg = Object.assign({}, DEFAULTS, JSON.parse(localStorage.getItem('NAIMON_CFG') || '{}')); }
+  catch (e) { _cfg = Object.assign({}, DEFAULTS); }
+  return _cfg;
 }
-function saveS() { const c = getCtx(); if (c && c.saveSettingsDebounced) c.saveSettingsDebounced(); }
+function saveS() { try { localStorage.setItem('NAIMON_CFG', JSON.stringify(S())); } catch (e) {} }
 
 /* ---------------- 工具 ---------------- */
 const clean = s => String(s == null ? '' : s).replace(/[\r\n]+/g, ' ').replace(/[|{}]/g, '').replace(/"/g, '').replace(/\s+/g, ' ').trim();
@@ -211,7 +192,7 @@ const CORE = `
   <div class="nm-log"><span class="nm-status">// system idle. awaiting feed…</span></div>
   <div class="nm-foot"><span class="nm-node">NODE 10.7.•.• · TRACE:OFF</span>
     <span class="nm-btns"><button class="nm-b nm-gen">▶ 生成</button><button class="nm-b nm-re">🔄 重截</button></span></div>
-  <div class="nm-brand">NAI-SURVEILLANCE · v3.1</div>
+  <div class="nm-brand">NAI-SURVEILLANCE · v4.0</div>
 </div>`;
 
 /* ---------------- 设置面板 HTML（浮窗内嵌，单实例） ---------------- */
@@ -248,7 +229,6 @@ function cfgHTML() {
       <label class="ck"><input type="checkbox" data-k="inline"${s.inline?' checked':''}>每条AI回复末尾也内嵌一个监控窗</label>
       <label class="ck"><input type="checkbox" data-k="markerOnly"${s.markerOnly?' checked':''}>内嵌时仅在带 &lt;监控窗&gt; 标记的回复显示</label>
       <label class="ck"><input type="checkbox" data-k="showhr"${s.showhr?' checked':''}>显示心率/情绪读数</label>
-      <label class="ck"><input type="checkbox" data-k="fab"${s.fab?' checked':''}>显示屏幕上的悬浮按钮</label>
       ${L('主题色', `<input type="color" data-k="accent" value="${s.accent}">`)}
     </div>
     <div class="nm-cfg-f"><button class="nm-b" data-cfgclose>关闭</button><button class="nm-b" data-cfggen>保存并生成</button></div>
@@ -262,7 +242,6 @@ function wireCfg(scope, mon) {
       st[k] = (el.type === 'checkbox') ? el.checked : el.value;
       saveS();
       if (k === 'accent' && mon) mon.setAccent(st.accent);
-      if (k === 'fab') updateFab();
     });
   });
   scope.querySelectorAll('[data-cfgclose]').forEach(b => b.addEventListener('click', () => scope.querySelector('.nm-cfg').classList.add('hide')));
@@ -379,15 +358,11 @@ class Monitor {
   }
 }
 
-/* ---------------- 悬浮按钮 + 浮窗（常驻，单实例） ---------------- */
+/* ---------------- 监控浮窗（单实例，从菜单打开） ---------------- */
 let FLOAT = null, FLOATMON = null;
 function buildFloat() {
   if (document.getElementById('nm-float')) return;
   injectStyle();
-  // 按钮
-  const fab = document.createElement('div'); fab.id = 'nm-fab'; fab.innerHTML = '📡<span class="dot"></span>';
-  document.body.appendChild(fab);
-  // 浮窗
   const float = document.createElement('div'); float.id = 'nm-float';
   const root = document.createElement('div'); root.className = 'nm-root';
   root.innerHTML = CORE + cfgHTML();
@@ -399,22 +374,32 @@ function buildFloat() {
   wireCfg(root, mon);
   mon.q('.nm-gear').addEventListener('click', () => root.querySelector('.nm-cfg').classList.remove('hide'));
   const minBtn = mon.q('[data-min]'); if (minBtn) minBtn.addEventListener('click', () => toggleFloat(false));
-  // 悬浮按钮：点击开关 + 拖动
-  makeDraggable(fab, fab, () => toggleFloat());
-  // 浮窗顶栏拖动
   makeDraggable(float, mon.q('.nm-handle'));
-  // 启动显示缓存
-  const cc = mon.cacheGet(); if (cc) mon.render(cc); else mon.log('// 待机 · 点 ▶ 生成 / 或发一条回复');
-  updateFab();
+  const cc = mon.cacheGet(); if (cc) mon.render(cc); else mon.log('// 待机 · 点 ▶ 生成');
 }
 function toggleFloat(show) {
+  if (!FLOAT) { try { buildFloat(); } catch (e) { console.error('[NAIMon]', e); } }
   if (!FLOAT) return;
   const willShow = (show === undefined) ? !FLOAT.classList.contains('show') : show;
   FLOAT.classList.toggle('show', willShow);
   if (willShow && FLOATMON) { FLOATMON.id = latestAiId(); const cc = FLOATMON.cacheGet(); if (cc) FLOATMON.render(cc); }
 }
-function updateFab() { const fab = document.getElementById('nm-fab'); if (fab) fab.style.display = (S().fab ? 'flex' : 'none'); }
 function openFloatSettings() { toggleFloat(true); if (FLOAT) { const cfg = FLOAT.querySelector('.nm-cfg'); if (cfg) cfg.classList.remove('hide'); } }
+
+/* ---------------- 魔法棒菜单入口 ---------------- */
+function addWandItem() {
+  if (document.getElementById('nm_wand_item')) return true;
+  const menu = document.getElementById('extensionsMenu');
+  if (!menu) return false;
+  const item = document.createElement('div');
+  item.id = 'nm_wand_item';
+  item.className = 'list-group-item flex-container flexGap5 interactable';
+  item.tabIndex = 0;
+  item.innerHTML = '<div class="fa-solid fa-satellite-dish" style="font-size:18px;width:20px;text-align:center"></div><span>黑客监控窗</span>';
+  item.addEventListener('click', () => { toggleFloat(true); });
+  menu.appendChild(item);
+  return true;
+}
 
 /* 通用拖动（触摸/鼠标）；无移动则视为点击 */
 function makeDraggable(moveEl, handle, onClick) {
@@ -458,28 +443,27 @@ function injectInline(mesId) {
 }
 
 /* ---------------- 启动 ---------------- */
-// —— 模块一加载就先把悬浮按钮建出来（不依赖酒馆上下文，纯探针）——
-尝试 { 注入样式(); 构建浮动(); }
-捕获 (e) { 控制台.错误('[NAIMon UI]', e); }
+// 预建浮窗（隐藏），并把入口挂到魔法棒菜单
+尝试 { 注入样式(); 构建浮动(); } 捕获 (e) { 控制台.错误('[NAIMon UI]', e); }
+
+// 菜单可能还没渲染，轮询直到挂上入口
+(函数 wandLoop(尝试) {
+  尝试 {如果(添加魔杖物品)窗口.toastr && 成功'已就绪，点左下角魔法棒里的「黑客监控窗」', '监控窗'; 返回}捕获异常并控制台输出错误信息'[NAIMon魔杖]'
+  如果 ((尝试次数 || 0) < 60) setTimeout(() => 魔杖循环((尝试次数 || 0) + 1), 800);
+})(0);
 
 函数 启动() {
   常量 c = 获取上下文();
-  如果 (!c) { setTimeout(启动, 600); 返回; }               // 等待上下文以挂载事件
-  // 上下文就绪：刷新浮窗对准的楼层 + 显示缓存
+  如果 (!c) { setTimeout(boot, 600); 返回; }
   尝试 { 如果 (FLOATMON) { FLOATMON.编号 = 最新AiId(); 常量 cc = FLOATMON.缓存获取(); 如果 (cc) FLOATMON.渲染(cc); } } 捕获 (e) {}
-  // 事件系统：新旧名字都兼容（eventTypes / event_types）
   try {
     const ET = c.eventTypes || c.event_types;
     if (c.eventSource && ET) {
       如果 (ET.CHARACTER_MESSAGE_RENDERED)ceventSource为真，id => {尝试注入内联数字; FLOATMON = 最新AI ID}catcheconsoleerror'[NAIMon]';
       如果 (ET.MESSAGE_RECEIVED) c.eventSource.为(ET.MESSAGE_RECEIVED, () => { 如果 (FLOATMON) FLOATMON.id = latestAiId(); });
-      如果 (ET.CHAT_CHANGED)ceventSource为真，则setTimeout{documentquerySelectorAll'.mes[mesid]'遍历每个元素并执行injectInline数字getAttribute'mesid'; FLOATMONid = latestAiId}500;
-    } 否则 {
-      控制台.警告('[NAIMon] 事件系统不可用，改用轮询兜底');
-      setInterval(() => { try { document.querySelectorAll('.mes[mesid]').forEach(el => injectInline(Number(el.getAttribute('mesid')))); if (FLOATMON) FLOATMON.id = latestAiId(); } catch (e) {} }, 2500);
+      如果 (ET.CHAT_CHANGED)ceventSource为真，则setTimeout{documentquerySelectorAll'.mes[mesid]'遍历每个元素并执行injectInline数字getAttribute'mesid'; FLOATMONid = 最新AiId}500;
     }
   } catch (e) { console.error('[NAIMon events]', e); }
-  console.log('[NAIMon] 黑客监控窗 v2.1 已加载');
-  如果 (window.toastr && window.toastr.成功) window.toastr.成功('黑客监控窗已就绪，右下角有  按钮', '监控窗');
+  控制台.日志('[NAIMon] 黑客监控窗 v4.0 已加载');
 }
 启动();
