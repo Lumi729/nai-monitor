@@ -10,7 +10,7 @@
 const MODULE = 'nai_monitor';
 const getCtx = () => (window.SillyTavern && SillyTavern.getContext) ? SillyTavern.getContext() : null;
 
-const DEF_INST =
+常量 DEF_INST =
 `你是一套隐蔽监控系统的【画面分析模块】。下面会给你角色扮演的最新正文和历史片段。
 请根据场景自动判断此刻最该被监控拍到的一个主体（可能是某个角色，也可能是用户）。
 只输出一个 JSON 对象（不要解释、不要代码块、不要多余文字），字段如下：
@@ -39,12 +39,17 @@ const DEFAULTS = {
   trig: 'auto', markerOnly: false, showhr: true, accent: '#38f0c8'
 };
 
+let _LOCAL = null;
 function S() {
-  const c = getCtx(); if (!c) return { ...DEFAULTS };
-  c.extensionSettings[MODULE] = Object.assign({}, DEFAULTS, c.extensionSettings[MODULE] || {});
-  return c.extensionSettings[MODULE];
+  const c = getCtx();
+  if (c && c.extensionSettings) {
+    c.extensionSettings[MODULE] = Object.assign({}, DEFAULTS, c.extensionSettings[MODULE] || {});
+    return c.extensionSettings[MODULE];
+  }
+  if (!_LOCAL) _LOCAL = Object.assign({}, DEFAULTS);
+  return _LOCAL;
 }
-function saveS() { const c = getCtx(); if (c) c.saveSettingsDebounced(); }
+function saveS() { const c = getCtx(); if (c && c.saveSettingsDebounced) c.saveSettingsDebounced(); }
 
 /* ---------------- 工具 ---------------- */
 const clean = s => String(s == null ? '' : s).replace(/[\r\n]+/g, ' ').replace(/[|{}]/g, '').replace(/"/g, '').replace(/\s+/g, ' ').trim();
@@ -395,33 +400,33 @@ function updateFab() { const fab = document.getElementById('nm-fab'); if (fab) f
 function openFloatSettings() { toggleFloat(true); if (FLOAT) { const cfg = FLOAT.querySelector('.nm-cfg'); if (cfg) cfg.classList.remove('hide'); } }
 
 /* 通用拖动（触摸/鼠标）；无移动则视为点击 */
-function makeDraggable(moveEl, handle, onClick) {
+函数 makeDraggable(moveEl, handle, onClick) {
   let sx, sy, ox, oy, moved, dragging = false;
   const start = (x, y) => { dragging = true; moved = false; sx = x; sy = y; const r = moveEl.getBoundingClientRect(); ox = r.left; oy = r.top; };
-  const move = (x, y) => {
-    if (!dragging) return; const dx = x - sx, dy = y - sy;
-    if (Math.abs(dx) + Math.abs(dy) > 6) moved = true;
+  常量 移动 = (x, y) => {
+如果正在拖动) 返回
+    如果 (Math.abs(dx) + Math.abs(dy) > 6) 移动 = 真;
     moveEl.style.left = Math.max(0, Math.min(window.innerWidth - 40, ox + dx)) + 'px';
     moveEl.style.top = Math.max(0, Math.min(window.innerHeight - 40, oy + dy)) + 'px';
     moveEl.style.right = 'auto'; moveEl.style.bottom = 'auto';
   };
   const end = () => { if (dragging && !moved && onClick) onClick(); dragging = false; };
-  handle.addEventListener('touchstart', e => { const t = e.touches[0]; start(t.clientX, t.clientY); }, { passive: true });
-  handle.addEventListener('touchmove', e => { const t = e.touches[0]; move(t.clientX, t.clientY); }, { passive: true });
+  句柄.addEventListener('touchstart', e => { const t = e.touches[0]; start(t.clientX, t.clientY); }, { 被动: 真 });
+  句柄.addEventListener('touchmove', e => { const t = e.touches[0]; move(t.clientX, t.clientY); }, { 被动: true });
   handle.addEventListener('touchend', end);
   handle.addEventListener('mousedown', e => { start(e.clientX, e.clientY); const mm = ev => move(ev.clientX, ev.clientY); const mu = () => { end(); document.removeEventListener('mousemove', mm); document.removeEventListener('mouseup', mu); }; document.addEventListener('mousemove', mm); document.addEventListener('mouseup', mu); });
 }
 
 /* ---------------- 每条AI回复内嵌 ---------------- */
-function injectInline(mesId) {
+函数 注入内联(消息ID) {
   const c = getCtx(); if (!c) return; const s = S();
-  if (!s.enabled || !s.inline) return;
-  if (mesId == null) return;
+  如果 (!s.已启用 || !s.内联) 返回;
+如果  == 空) 返回
   const chat = c.chat || []; const msg = chat[mesId]; if (!msg || msg.is_user) return;
-  if (s.markerOnly && !/[<＜]监控窗[>＞]/.test(msg.mes || '')) return;
+如果 .markerOnly && !/[<＜]监控窗[>＞]/测试消息 || '')返回
   const mesEl = document.querySelector('.mes[mesid="' + mesId + '"]'); if (!mesEl) return;
   const textEl = mesEl.querySelector('.mes_text'); if (!textEl) return;
-  if (textEl.querySelector('.nm-root')) return;
+如果 .querySelector('.nm-root')) 返回
   const root = document.createElement('div'); root.className = 'nm-root nm-inline'; root.innerHTML = CORE;
   textEl.appendChild(root);
   const mon = new Monitor(root, mesId);
@@ -430,25 +435,30 @@ function injectInline(mesId) {
   const minb = mon.q('[data-min]'); if (minb) minb.style.display = 'none';
   const cc = mon.cacheGet();
   const isLatest = mesId === latestAiId();
-  if (cc) { mon.render(cc); mon.log('// 已用缓存画面', 'var(--mut)'); }
-  else if (s.trig === 'auto' && isLatest) setTimeout(() => mon.run(false), 300);
-  else { mon.q('.nm-lt').textContent = '点 ▶ 生成'; mon.log('// 点 ▶ 生成'); }
+  如果 (cc) { mon.render(cc); mon.日志('// 已用缓存画面', 'var(--mut)'); }
+  否则 如果 (s.trig === 'auto' && isLatest) setTimeout(() => mon.运行(false), 300);
+  否则 { mon.q('.nm-lt').textContent = '点击 ▶ 生成'; mon.log('// 点击 ▶ 生成'); }
 }
 
 /* ---------------- 启动 ---------------- */
-function boot() {
+函数 启动() {
   常量 c = 获取上下文();
-  if (!c || !c.eventSource || !c.event_types) { setTimeout(boot, 800); return; }
+  如果 (!c) { setTimeout(启动, 600); 返回; }               // 只等上下文，不再死等事件系统
+  // 1) 悬浮按钮/浮窗：只要能拿到上下文就先建出来
+  尝试 { 注入样式(); 构建浮动(); }
+  捕获 (e) { 控制台.错误('[NAIMon 构建浮动]', e); 如果 (window.toastr) window.toastr.错误(‘监控窗UI异常：’ + (e && e.message), ‘NAIMon’); }
+  // 2) 事件系统：新旧名字都兼容（eventTypes / event_types）
   try {
-    injectStyle();
-    buildFloat();
-    const ET = c.event_types;
-    c.eventSource.on(ET.CHARACTER_MESSAGE_RENDERED, (id) => {
-      try { injectInline(Number(id)); if (FLOATMON) { FLOATMON.id = latestAiId(); if (S().trig === 'auto' && !FLOATMON.cacheGet()) { /* 浮窗按钮在时可自动，但避免重复出图，仅内嵌自动 */ } } } catch (e) { console.error('[NAIMon]', e); }
-    });
-    if (ET.CHAT_CHANGED) c.eventSource.on(ET.CHAT_CHANGED, () => setTimeout(() => { document.querySelectorAll('.mes[mesid]').forEach(el => injectInline(Number(el.getAttribute('mesid')))); if (FLOATMON) FLOATMON.id = latestAiId(); }, 500));
-    console.log('[NAIMon] 黑客监控窗 v2.1 已加载');
-    if (window.toastr && window.toastr.success) window.toastr.success('黑客监控窗 v2.1 已就绪，右下角有📡按钮', '监控窗');
-  } catch (e) { console.error('[NAIMon boot]', e); if (window.toastr) window.toastr.error('监控窗启动异常：' + (e && e.message), 'NAIMon'); }
+    const ET = c.eventTypes || c.event_types;
+    if (c.eventSource && ET) {
+      如果 (ET.CHARACTER_MESSAGE_RENDERED)ceventSource为真，id => {尝试注入内联数字; FLOATMON = 最新AI ID}catcheconsoleerror'[NAIMon]';
+      如果 (ET.MESSAGE_RECEIVED) c.eventSource.为(ET.MESSAGE_RECEIVED, () => { 如果 (FLOATMON) FLOATMON.id = 最新AiId(); });
+      如果 (ET.CHAT_CHANGED)ceventSource为真，则setTimeout{documentquerySelectorAll'.mes[mesid]'遍历每个元素并执行injectInline数字getAttribute'mesid'; FLOATMONid = latestAiId}500;
+    } 否则 {
+      控制台.警告('[NAIMon] 事件系统不可用，改用轮询兜底');
+      setInterval(() => { try { document.querySelectorAll('.mes[mesid]').forEach(el => injectInline(Number(el.getAttribute('mesid')))); if (FLOATMON) FLOATMON.id = latestAiId(); } catch (e) {} }, 2500);
+    }
+  } catch (e) { console.error('[NAIMon events]', e); }
+  console.log('[NAIMon] 黑客监控窗 v2.1 已加载');
+  如果 (window.toastr && window.toastr.success) window.toastr.success('黑客监控窗已就绪，右下角有  按钮', '监控窗');
 }
-boot();
