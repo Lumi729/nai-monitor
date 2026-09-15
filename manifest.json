@@ -1,0 +1,12 @@
+{
+  "display_name": "黑客监控窗 · NAI",
+  "loading_order": 100,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "css": "",
+  "author": "千千 & 小克",
+  "version": "2.0.0",
+  "homePage": "https://github.com/Lumi729/nai-monitor",
+  "auto_update": true
+}
