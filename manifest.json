@@ -5,8 +5,8 @@
   "optional": [],
   "js": "index.js",
   "css": "",
-  "author": "千千 & 小克",
-  "version": "3.1.0",
+  "author": "local",
+  "version": "4.0.0",
   "homePage": "https://github.com/Lumi729/nai-monitor",
   "auto_update": true
 }
