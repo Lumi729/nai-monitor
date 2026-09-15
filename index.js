@@ -1,20 +1,29 @@
 /* ============================================================
- * 黑客监控窗 · NovelAI 生图监控扩展  v3.0
+ * 黑客监控窗 · NovelAI 生图监控扩展  v3.1
  * SillyTavern 第三方扩展（manifest.json + index.js）
  * 作者：千千 & 小克老师
- * v3.0：常驻可拖动【悬浮按钮】→ 打开【监控浮窗】（图/心率情绪/设置全在浮窗里）
+ * v3.1：常驻可拖动【悬浮按钮】→ 打开【监控浮窗】（图/心率情绪/设置全在浮窗里）
  *       + 可选每条AI回复末尾也内嵌一个监控窗
  * 出图走酒馆同源 /api/novelai/generate-image（NAI key 存酒馆 API连接→NovelAI）
  * ============================================================ */
 
-// 用酒馆标准模块导入（和其它能跑的扩展一致），不依赖 window.SillyTavern.getContext
-import { chat, event_types, eventSource, saveSettingsDebounced, getRequestHeaders, generateQuietPrompt } from "../../../../script.js";
+// 只导入各版本酒馆都稳定存在的名字（和能跑的 ST-QuickBar 同一套），不依赖 window.SillyTavern.getContext
+import { chat, event_types, eventSource, saveSettingsDebounced, getRequestHeaders } from "../../../../script.js";
 import { extension_settings } from "../../../extensions.js";
+
+// generateQuietPrompt 在个别酒馆版本不是命名导出；动态取，取不到也不拖垮整个脚本
+let _gqp = null;
+import("../../../../script.js").then(m => { _gqp = m.generateQuietPrompt || null; }).catch(() => {});
+function gqp() {
+  if (_gqp) return _gqp;
+  try { if (window.SillyTavern && SillyTavern.getContext) return SillyTavern.getContext().generateQuietPrompt || null; } catch (e) {}
+  return null;
+}
 
 const MODULE = 'nai_monitor';
 // 兼容层：保持后面代码 getCtx().xxx 的写法不变
 function getCtx() {
-  return { chat, generateQuietPrompt, getRequestHeaders, saveSettingsDebounced, eventSource, event_types, eventTypes: event_types, extensionSettings: extension_settings };
+  return { chat, generateQuietPrompt: gqp(), getRequestHeaders, saveSettingsDebounced, eventSource, event_types, eventTypes: event_types, extensionSettings: extension_settings };
 }
 
 const DEF_INST =
@@ -202,7 +211,7 @@ const CORE = `
   <div class="nm-log"><span class="nm-status">// system idle. awaiting feed…</span></div>
   <div class="nm-foot"><span class="nm-node">NODE 10.7.•.• · TRACE:OFF</span>
     <span class="nm-btns"><button class="nm-b nm-gen">▶ 生成</button><button class="nm-b nm-re">🔄 重截</button></span></div>
-  <div class="nm-brand">NAI-SURVEILLANCE · v3.0</div>
+  <div class="nm-brand">NAI-SURVEILLANCE · v3.1</div>
 </div>`;
 
 /* ---------------- 设置面板 HTML（浮窗内嵌，单实例） ---------------- */
@@ -311,7 +320,7 @@ class Monitor {
       const d = await r.json();
       return d.choices && d.choices[0] && d.choices[0].message ? d.choices[0].message.content : JSON.stringify(d);
     } else {
-      if (!c.generateQuietPrompt) throw new Error('找不到 generateQuietPrompt');
+      if (!c.generateQuietPrompt) throw new Error('主API生成不可用，请在设置里改用副API');
       return await c.generateQuietPrompt(sys + '\n\n' + usr, false, true);
     }
   }
@@ -455,16 +464,16 @@ function injectInline(mesId) {
 
 函数 启动() {
   常量 c = 获取上下文();
-  如果 (!c) { setTimeout(boot, 600); 返回; }               // 等待上下文以挂载事件
+  如果 (!c) { setTimeout(启动, 600); 返回; }               // 等待上下文以挂载事件
   // 上下文就绪：刷新浮窗对准的楼层 + 显示缓存
-  尝试 { 如果 (FLOATMON) { FLOATMON.id = latestAiId(); 常量 cc = FLOATMON.缓存获取(); 如果 (cc) FLOATMON.渲染(cc); } } 捕获 (e) {}
+  尝试 { 如果 (FLOATMON) { FLOATMON.编号 = 最新AiId(); 常量 cc = FLOATMON.缓存获取(); 如果 (cc) FLOATMON.渲染(cc); } } 捕获 (e) {}
   // 事件系统：新旧名字都兼容（eventTypes / event_types）
   try {
     const ET = c.eventTypes || c.event_types;
     if (c.eventSource && ET) {
-      如果 (ET.CHARACTER_MESSAGE_RENDERED)ceventSource为真，id => {尝试注入内联数字; FLOATMON = 最新AI ID}catcheconsoleerror'[NAIMon]'';
+      如果 (ET.CHARACTER_MESSAGE_RENDERED)ceventSource为真，id => {尝试注入内联数字; FLOATMON = 最新AI ID}catcheconsoleerror'[NAIMon]';
       如果 (ET.MESSAGE_RECEIVED) c.eventSource.为(ET.MESSAGE_RECEIVED, () => { 如果 (FLOATMON) FLOATMON.id = latestAiId(); });
-      如果 (ET.CHAT_CHANGED)当ceventSource为真时，则使用setTimeout{documentquerySelectorAll'.mes[mesid]'遍历每个元素并执行injectInline数字getAttribute'mesid'; FLOATMONid = latestAiId}500;
+      如果 (ET.CHAT_CHANGED)ceventSource为真，则setTimeout{documentquerySelectorAll'.mes[mesid]'遍历每个元素并执行injectInline数字getAttribute'mesid'; FLOATMONid = latestAiId}500;
     } 否则 {
       控制台.警告('[NAIMon] 事件系统不可用，改用轮询兜底');
       setInterval(() => { try { document.querySelectorAll('.mes[mesid]').forEach(el => injectInline(Number(el.getAttribute('mesid')))); if (FLOATMON) FLOATMON.id = latestAiId(); } catch (e) {} }, 2500);
